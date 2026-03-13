@@ -23,16 +23,4 @@ function toggleTheme(){
 })();
 
 // ═══════════════════════════════════════════════════════════
-// SELECTOR DE MODO (pantalla)
-// ═══════════════════════════════════════════════════════════
-function setMode(mode){
-  document.body.className = document.body.className
-    .replace(/\bmode-\S+/g,'').replace(/\blight\b/,'').trim();
-  if(!darkMode) document.body.classList.add('light');
-  if(mode !== 'default') document.body.classList.add('mode-'+mode);
-  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('btn-mode-'+mode).classList.add('active');
-}
-
-// ═══════════════════════════════════════════════════════════
 // 

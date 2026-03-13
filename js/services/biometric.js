@@ -10,6 +10,18 @@ let globalVideo  = null;   // <video> oculto para face-api
 let scanActive   = false;  // true solo durante el proceso de un botón
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// ═══════════════════════════════════════════════════════════
+// EXCEPCIONES PERSONALIZADAS DEL SISTEMA BIOMÉTRICO
+// ═══════════════════════════════════════════════════════════
+class BiometricError extends Error {
+  constructor(tipo, mensaje) {
+    super(mensaje || tipo);
+    this.name = 'BiometricError';
+    // tipo: 'sin_ia' | 'sin_video' | 'sin_rostro' | 'rostro_desconocido' | 'cooldown'
+    this.tipo = tipo;
+  }
+}
+
 function getUmbral(){ return parseInt(document.getElementById('cfg-umbral')?.value||42)/100; }
 
 // Construye FaceMatcher filtrando outliers
@@ -170,6 +182,21 @@ function stopFaceWakeUp(){
   logDiag('wakeup_stop');
 }
 
+function detenerCamara(){
+  stopFaceWakeUp();
+  if(videoStream){
+    videoStream.getTracks().forEach(t => t.stop());
+    videoStream = null;
+  }
+  if(globalVideo){ try{ globalVideo.srcObject = null; }catch(e){} }
+  const bv = document.getElementById('bio-video');
+  if(bv){ bv.srcObject = null; bv.style.display = 'none'; }
+  const ph = document.getElementById('bio-placeholder');
+  if(ph) ph.style.display = '';
+  actualizarDotCamara(false);
+  logDiag('camera_stopped');
+}
+
 // ═══════════════════════════════════════════════════════════
 // PERSISTENCIA DE ENROLADOS — sessionStorage
 // Float32Array no es serializable a JSON directamente
@@ -274,15 +301,70 @@ async function iniciarEscaneo(tipo, icono, color, attendanceType, employeeIdOver
     return;
   }
   scanActive = true;
+  // Encender cámara al iniciar escaneo
+  if(!videoStream || !videoStream.active){
+    setBioLabel('Encendiendo cámara...');
+    setBioStatus('loading', 'Iniciando cámara...');
+    const camOk = await iniciarCamaraGlobal();
+    if(!camOk){
+      scanActive = false;
+      setBioLabel('Sin cámara');
+      setBioStatus('err', 'No se pudo acceder a la cámara');
+      setBioRingState('waiting');
+      return;
+    }
+    await sleep(800); // dar tiempo al video para arrancar
+  }
   try {
     await _escaneoInterno(tipo, icono, color, attendanceType, employeeIdOverride, verifyModeOverride, workCode);
   } catch(e) {
-    console.error('[SCAN] excepción:', e.message, e.stack);
-    setBioStatus('err','Error: '+e.message);
-    setBioLabel('Error interno');
+    if(e instanceof BiometricError){
+      switch(e.tipo){
+        case 'sin_rostro':
+        case 'rostro_desconocido':
+          setBioRingState('waiting');
+          setBioLabel('Rostro desconocido');
+          setBioStatus('err', 'No se pudo identificar el rostro');
+          hablarTexto('Rostro desconocido.');
+          await sleep(4000);
+          break;
+        case 'cooldown':
+          setBioRingState('waiting');
+          setBioLabel('Ya registrado');
+          setBioStatus('warn', e.message);
+          await sleep(2500);
+          break;
+        case 'sin_ia':
+          setBioRingState('waiting');
+          setBioLabel('IA no disponible');
+          setBioStatus('err', e.message);
+          await sleep(3000);
+          break;
+        case 'sin_video':
+          setBioRingState('waiting');
+          setBioLabel('Sin cámara');
+          setBioStatus('err', e.message);
+          await sleep(3000);
+          break;
+        default:
+          setBioRingState('waiting');
+          setBioLabel('Error del sistema');
+          setBioStatus('err', e.message);
+          await sleep(3000);
+      }
+    } else {
+      console.error('[SCAN] excepción inesperada:', e.message, e.stack);
+      setBioRingState('waiting');
+      setBioLabel('Error interno');
+      setBioStatus('err', 'Error inesperado — revisar consola');
+      await sleep(3000);
+    }
+    setBioLabel('Asistencia');
+    setBioStatus('ok', 'Presione un botón para marcar asistencia');
+    setBioRingState('waiting');
   } finally {
     scanActive = false;
-    startFaceWakeUp();
+    detenerCamara();
   }
 }
 
@@ -303,20 +385,8 @@ async function _escaneoInterno(tipo, icono, color, attendanceType, employeeIdOve
 
   // PASO 3: sin IA o sin enrolados → BLOQUEAR (no registrar sin reconocimiento si hay enrolados)
   if(!faceApiReady){
-    setBioLabel('IA no disponible'); setBioStatus('err','Los modelos de reconocimiento no cargaron');
-    await sleep(3000);
-    setBioLabel('Asistencia'); setBioStatus('ok','Presione un botón para marcar asistencia'); setBioRingState('waiting');
-    return;
+    throw new BiometricError('sin_ia', 'Los modelos de reconocimiento no cargaron');
   }
-  if(enrolledPeople.length===0){
-    // Sin enrolados: modo manual permitido
-    setBioLabel('Registrando...'); setBioStatus('ok','Sin biometría configurada — modo libre');
-    await sleep(400);
-    detectedPerson=null; lastConfidence=null;
-    await registrarMarca(tipo, icono, color, attendanceType, employeeIdOverride||null, verifyModeOverride||9, finalWorkCode);
-    return;
-  }
-
   // PASO 4: asegurar video disponible
   setBioLabel('Buscando cámara...');
   // Forzar reconexión de globalVideo
@@ -339,16 +409,13 @@ async function _escaneoInterno(tipo, icono, color, attendanceType, employeeIdOve
   await sleep(300);
 
   if(!src){
-    setBioLabel('Sin video'); setBioStatus('err','No hay fuente de video');
-    await sleep(3000);
-    setBioLabel('Asistencia'); setBioStatus('ok','Presione un botón para marcar asistencia'); setBioRingState('waiting');
-    return;
+    throw new BiometricError('sin_video', 'No hay fuente de video disponible');
   }
 
   // PASO 5: escaneo facial
   setBioLabel('Escaneando...'); setBioStatus('scanning','Detectando rostro...');
   const opts = new faceapi.TinyFaceDetectorOptions({inputSize:320, scoreThreshold:0.35});
-  const scanSeg = parseInt(document.getElementById('cfg-scan-tiempo')?.value||20);
+  const scanSeg = parseInt(document.getElementById('cfg-scan-tiempo')?.value||8);
   const deadline = Date.now() + scanSeg * 1000;
   let descriptor = null;
   let frameN = 0;
@@ -381,12 +448,7 @@ async function _escaneoInterno(tipo, icono, color, attendanceType, employeeIdOve
 
   // PASO 6: sin rostro
   if(!descriptor){
-    setBioRingState('waiting'); setBioLabel('No se detectó rostro');
-    setBioStatus('err',`${frameN} frames — sin detección`);
-    hablarTexto('No se detectó ningún rostro. Por favor, reintente.');
-    await sleep(4000);
-    setBioLabel('Asistencia'); setBioStatus('ok','Presione un botón para marcar asistencia'); setBioRingState('waiting');
-    return;
+    throw new BiometricError('sin_rostro', `${frameN} frames analizados sin detección`);
   }
 
   // PASO 7: comparar
@@ -397,11 +459,7 @@ async function _escaneoInterno(tipo, icono, color, attendanceType, employeeIdOve
 
   // PASO 8: cooldown
   if(match.name && enCooldown(match.name)){
-    setBioRingState('waiting'); setBioLabel('Ya registrado');
-    setBioStatus('warn',match.name+' ya marcó hace pocos segundos');
-    await sleep(2500);
-    setBioLabel('Asistencia'); setBioStatus('ok','Presione un botón para marcar asistencia'); setBioRingState('waiting');
-    return;
+    throw new BiometricError('cooldown', match.name+' ya marcó hace pocos segundos');
   }
 
   // PASO 9: reconocido
@@ -416,12 +474,7 @@ async function _escaneoInterno(tipo, icono, color, attendanceType, employeeIdOve
   }
 
   // PASO 10: no reconocido
-  setBioRingState('waiting'); setBioLabel('Rostro no identificado');
-  setBioStatus('err',`No reconocido — dist=${match.distance?.toFixed(3)}`);
-  hablarTexto('Rostro no identificado. Por favor, reintente.');
-  await sleep(4000);
-  setBioLabel('Asistencia'); setBioStatus('ok','Presione un botón para marcar asistencia'); setBioRingState('waiting');
-  // wake-up se reanuda en finally
+  throw new BiometricError('rostro_desconocido', `dist=${match.distance?.toFixed(3)}`);
 }
 // ═══════════════════════════════════════════════════════════
 // MARCACIÓN
@@ -1498,21 +1551,8 @@ function iniciarWatchdogCamara(){
   }, 5000); // revisar cada 5 segundos
 }
 
-// Reanudar cámara cuando la pestaña vuelve a estar visible (PDF punto 5)
-document.addEventListener('visibilitychange',async()=>{
-  if(document.visibilityState==='visible'){
-    logDiag('app_resumed');
-    const streamMuerto=!videoStream||!videoStream.active||
-      videoStream.getTracks().every(t=>t.readyState==='ended');
-    if(streamMuerto&&cameraPermissionState==='granted'){
-      logDiag('camera_restart_on_resume');
-      videoStream=null; globalVideo=null;
-      const ok2 = await iniciarCamaraGlobal();
-      if(ok2) startFaceWakeUp();
-    }
-  } else {
-    logDiag('app_paused');
-  }
+document.addEventListener('visibilitychange',()=>{
+  logDiag(document.visibilityState==='visible'?'app_resumed':'app_paused');
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -1547,13 +1587,7 @@ async function arranqueKiosk(){
   // PASO 2 — Cargar modelos IA (en paralelo con la espera del permiso ya resuelta)
   await cargarModelosIA();
 
-  // PASO 3 — Abrir cámara automáticamente si hay permiso
-  if(cameraPermissionState === 'granted'){
-    logDiag('camera_autostart');
-    await iniciarCamaraGlobal();
-    iniciarWatchdogCamara();
-    // Wake-Up arranca cuando los modelos terminen de cargar (en cargarModelosIA)
-  }
+  // PASO 3 — cámara se enciende solo cuando el usuario presiona un botón
 }
 
 // Carga modelos IA — llamada desde arranqueKiosk después de obtener permiso
@@ -1579,8 +1613,6 @@ async function cargarModelosIA(){
     setBioRingState('waiting');
     actualizarEstadoSistema();
     cargarEnroladosSession(); // restaurar enrolados de sessionStorage
-    // Iniciar Face Wake-Up ahora que los modelos están listos
-    startFaceWakeUp();
   }catch(err){
     document.getElementById('models-bar').style.display='none';
     setBioStatus('error','Modelos no disponibles');

@@ -19,22 +19,7 @@
 <div class="bg-glow-1"></div>
 <div class="bg-glow-2"></div>
 
-<!-- SELECTOR DE MODO (backend) -->
-<div id="mode-selector">
-  <span style="font-family:var(--font-mono);font-size:10px;color:rgba(0,229,255,.5);padding-right:4px;">MODO:</span>
-  <button class="mode-btn active" onclick="setMode('default')" id="btn-mode-default">Default</button>
-  <button class="mode-btn" onclick="setMode('portrait')" id="btn-mode-portrait">iPad Portrait</button>
-  <button class="mode-btn" onclick="setMode('landscape')" id="btn-mode-landscape">Android 10.1"</button>
-</div>
-
-<div class="tablet-frame" id="tablet-frame">
-  <div class="hw-btn-right"></div><div class="hw-btn-right-2"></div>
-  <div class="notch">
-    <div class="sensor-dot"></div>
-    <div class="camera-ring"><div class="camera-lens" id="cam-led"></div></div>
-    <div class="sensor-dot"></div><div class="sensor-dot"></div>
-  </div>
-  <div class="screen">
+<div class="screen">
 
     <!-- ══ MAIN VIEW ══ -->
     <div id="view-main">
@@ -139,6 +124,7 @@
         </div>
         <div style="display:flex;gap:7px;align-items:center;">
           <button class="btn-secondary btn-eventos" onclick="abrirEventos()"><span class="s-icon">📋</span>EVENTOS</button>
+          <button class="btn-theme-toggle" id="btn-theme-toggle" onclick="toggleTheme()" title="Cambiar tema"></button>
           <button class="btn-config" onclick="mostrarLogin()">⚙️ Configuración</button>
         </div>
       </footer>
@@ -563,7 +549,6 @@
 
     <div class="toast" id="toast"><span>✅</span><span id="toast-msg">Marcación registrada</span></div>
   </div><!-- /screen -->
-</div><!-- /tablet-frame -->
 
 
 <!-- Lógica -->

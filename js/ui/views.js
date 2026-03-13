@@ -31,16 +31,12 @@ function volverMain(){
   if(cv) cv.getContext('2d').clearRect(0,0,cv.width,cv.height);
   document.getElementById('overlay-eventos').style.display='none';
   detectedPerson=null; lastConfidence=null;
-  // Mostrar video de cámara (stream sigue activo)
-  const bv=document.getElementById('bio-video');
-  if(bv&&videoStream&&videoStream.active){ bv.srcObject=videoStream; bv.style.display='block'; }
-  const ph=document.getElementById('bio-placeholder'); if(ph) ph.style.display='none';
+  // Apagar cámara — se enciende solo al presionar un botón
+  if(typeof detenerCamara === 'function') detenerCamara();
   setBioRingState('waiting');
   setBioLabel('Asistencia');
   setBioStatus('ok','Presione un botón para marcar asistencia');
   actualizarEstadoSistema();
-  // Reanudar detección facial en background
-  startFaceWakeUp();
   logDiag('volver_main');
 }
 function mostrarLogin(){
