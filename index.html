@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="es-UY">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Kiosk IA — Asistencia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Exo+2:wght@300;400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<!-- Face API -->
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<!-- SheetJS para exportación Excel -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- Estilos -->
+<link rel="stylesheet" href="css/kiosk.css">
+</head>
+<body>
+<div class="bg-animated"></div>
+<div class="bg-grid"></div>
+<div class="bg-glow-1"></div>
+<div class="bg-glow-2"></div>
+
+<!-- SELECTOR DE MODO (backend) -->
+<div id="mode-selector">
+  <span style="font-family:var(--font-mono);font-size:10px;color:rgba(0,229,255,.5);padding-right:4px;">MODO:</span>
+  <button class="mode-btn active" onclick="setMode('default')" id="btn-mode-default">Default</button>
+  <button class="mode-btn" onclick="setMode('portrait')" id="btn-mode-portrait">iPad Portrait</button>
+  <button class="mode-btn" onclick="setMode('landscape')" id="btn-mode-landscape">Android 10.1"</button>
+</div>
+
+<div class="tablet-frame" id="tablet-frame">
+  <div class="hw-btn-right"></div><div class="hw-btn-right-2"></div>
+  <div class="notch">
+    <div class="sensor-dot"></div>
+    <div class="camera-ring"><div class="camera-lens" id="cam-led"></div></div>
+    <div class="sensor-dot"></div><div class="sensor-dot"></div>
+  </div>
+  <div class="screen">
+
+    <!-- ══ MAIN VIEW ══ -->
+    <div id="view-main">
+
+      <!-- HEADER -->
+      <header class="kiosk-header">
+        <div class="kiosk-header-left">
+          <div class="inst-logo">JTG</div>
+          <div class="inst-info">
+            <div class="inst-name">Escuela N°192 — Joaquín Torres García</div>
+            <div class="inst-sub">AmtP · CEP · Sistema de Control de Asistencia</div>
+          </div>
+        </div>
+        <div class="kiosk-status-grid">
+          <div class="kst-item"><span class="ind-dot" id="dot-device"></span><span class="ind-label">Dispositivo conectado</span></div>
+          <div class="kst-item"><span class="ind-dot" id="dot-cam"></span><span class="ind-label">Cámara activa</span></div>
+          <div class="kst-item"><span class="ind-dot" id="dot-sync"></span><span class="ind-label">Sincronización OK</span></div>
+          <div class="kst-item"><span class="ind-dot" id="dot-enroll"></span><span class="ind-label" id="lbl-enroll">0 enrolados</span></div>
+        </div>
+      </header>
+
+      <!-- ZONA CENTRAL: en portrait = columna, en landscape = fila -->
+      <div class="kiosk-center">
+
+        <!-- COLUMNA IZQUIERDA: reloj + bio -->
+        <div class="kiosk-left">
+          <div class="kiosk-clock">
+            <div class="kiosk-time">
+              <span id="horas">--</span><span class="kiosk-colon">:</span><span id="minutos">--</span><span class="kiosk-colon">:</span><span id="segundos">--</span>
+              <span class="ampm-badge" id="ampm-badge" style="display:none">AM</span>
+            </div>
+            <div class="kiosk-date" id="fecha-display">cargando...</div>
+          </div>
+          <div class="kiosk-bio">
+            <div class="bio-ring-new state-waiting" id="bio-ring-new">
+              <svg class="bio-ring-deco" viewBox="0 0 200 200">
+                <circle cx="100" cy="100" r="88" fill="none" stroke="rgba(0,229,255,.07)" stroke-width="1.5"/>
+                <circle cx="100" cy="100" r="88" fill="none" stroke="url(#arcGN)" stroke-width="3" stroke-linecap="round" stroke-dasharray="160 393"/>
+                <circle cx="100" cy="100" r="76" fill="none" stroke="rgba(0,229,255,.04)" stroke-width="1"/>
+                <defs>
+                  <linearGradient id="arcGN" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="transparent"/>
+                    <stop offset="100%" stop-color="#00e5ff"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+              <div class="bio-ring-inner">
+                <video id="bio-video" autoplay muted playsinline style="display:none;width:100%;height:100%;object-fit:cover;border-radius:50%;transform:scaleX(-1);"></video>
+                <canvas id="bio-canvas-overlay" style="position:absolute;inset:0;border-radius:50%;pointer-events:none;"></canvas>
+                <div class="bio-face-icon" id="bio-placeholder">
+                  <svg viewBox="0 0 80 80" fill="none" style="width:55%;height:55%;">
+                    <ellipse cx="40" cy="29" rx="15" ry="17" stroke="currentColor" stroke-width="2.5"/>
+                    <path d="M10 72c0-16 13-25 30-25s30 9 30 25" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                  </svg>
+                </div>
+                <div class="bio-scan-line"></div>
+                <div class="models-loading-bar" id="models-bar" style="display:none"></div>
+              </div>
+            </div>
+            <p class="bio-hint-main" id="bio-label">Asistencia</p>
+            <p class="bio-hint-sub" id="bio-status">Presione un botón para marcar asistencia</p>
+          </div>
+        </div>
+
+        <!-- COLUMNA DERECHA: botones + panel info -->
+        <div class="kiosk-right">
+          <div class="kiosk-buttons">
+            <button class="kbtn kbtn-entrada"  onclick="iniciarEscaneo('ENTRADA','✅','#00e676',0)"><span class="kbtn-icon">→</span><span class="kbtn-label">ENTRADA</span></button>
+            <button class="kbtn kbtn-salida"   onclick="iniciarEscaneo('SALIDA','🔴','#ff1744',1)"><span class="kbtn-icon">←</span><span class="kbtn-label">SALIDA</span></button>
+            <button class="kbtn kbtn-descanso" onclick="iniciarEscaneo('DESCANSO','🟡','#ff9100',2)"><span class="kbtn-icon">☕</span><span class="kbtn-label">DESCANSO</span></button>
+            <button class="kbtn kbtn-retorno"  onclick="iniciarEscaneo('RETORNO','🔵','#42a5f5',3)"><span class="kbtn-icon">↩</span><span class="kbtn-label">RETORNO</span></button>
+          </div>
+          <div class="kiosk-info-panel">
+            <div class="kip-ultima">
+              <div class="kip-title">Última marcación</div>
+              <div class="kip-ultima-body">
+                <div class="kip-avatar" id="last-mark-avatar">
+                  <svg viewBox="0 0 40 40" fill="none" width="22" height="22"><ellipse cx="20" cy="14" rx="8" ry="9" stroke="currentColor" stroke-width="2"/><path d="M4 38c0-9 7-14 16-14s16 5 16 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </div>
+                <div>
+                  <div class="kip-name" id="last-mark-name">Sin registros</div>
+                  <div class="kip-meta" id="last-mark-meta">—</div>
+                </div>
+              </div>
+            </div>
+            <div class="kip-divider"></div>
+            <div class="kip-recientes">
+              <div class="kip-title">Eventos recientes</div>
+              <div id="recent-events-list"><div class="recent-empty">Sin eventos aún</div></div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /kiosk-center -->
+
+      <!-- FOOTER -->
+      <footer class="kiosk-footer">
+        <div class="brand-anep"><span>ANEP</span> · CEP · 2025</div>
+        <div class="ihr-logo-wrap">
+          <img src="https://drive.google.com/thumbnail?id=1EKhHvz3mVBkmC5KbtPj4pTiu9Ruwczyo&sz=w200" alt="IHR" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"/>
+          <span style="display:none;font-family:var(--font-display);font-size:10px;font-weight:700;color:rgba(0,229,255,.55);letter-spacing:1px;">IHR Labs</span>
+        </div>
+        <div style="display:flex;gap:7px;align-items:center;">
+          <button class="btn-secondary btn-eventos" onclick="abrirEventos()"><span class="s-icon">📋</span>EVENTOS</button>
+          <button class="btn-config" onclick="mostrarLogin()">⚙️ Configuración</button>
+        </div>
+      </footer>
+
+    </div>
+
+    <!-- ══ AI VIEW ══ -->    </div>
+
+    <!-- ══ AI VIEW ══ -->
+    <div id="view-ai">
+      <div class="ai-check" id="ai-check-icon">✅</div>
+      <div id="ai-confirm-block" style="text-align:center;display:none;">
+        <div style="font-family:var(--font-display);font-size:13px;font-weight:600;color:var(--text-muted);letter-spacing:3px;text-transform:uppercase;margin-bottom:4px;">MARCACIÓN CONFIRMADA</div>
+        <div id="ai-confirm-tipo" style="font-family:var(--font-display);font-size:42px;font-weight:900;letter-spacing:4px;text-transform:uppercase;line-height:1;">ENTRADA</div>
+        <div id="ai-confirm-sub" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;letter-spacing:1px;">CON ÉXITO</div>
+      </div>
+      <div class="ai-mark-time" id="ai-mark-time">--:-- — ...</div>
+      <div class="ai-person-detected" id="ai-person-row" style="display:none">
+        <div id="ai-person-avatar" style="width:38px;height:38px;border-radius:50%;background:var(--glass);border:2px solid rgba(0,229,255,.3);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;"></div>
+        <span id="ai-person-name" style="font-weight:700;">Docente</span>
+        <span id="ai-confidence-badge" class="confidence-badge alta" style="margin-left:6px;">● ALTA</span>
+      </div>
+      <div class="ai-divider"></div>
+      <div class="ai-label">✨ Mensaje IHR Kiosk IA</div>
+      <div class="ai-message-box">
+        <div class="ai-loading" id="ai-loading"><div class="ai-dot"></div><div class="ai-dot"></div><div class="ai-dot"></div></div>
+        <div class="ai-message-text" id="ai-message-text" style="display:none"></div>
+      </div>
+      <div class="ai-btn-row">
+        <button class="ai-tts-btn" id="ai-tts-btn" onclick="leerMensaje()" style="display:none">🔊 Leer mensaje IA</button>
+        <button class="ai-return-btn" id="ai-return-btn" onclick="volverMain()" style="display:none">← Volver</button>
+      </div>
+      <div class="ai-gemini-badge"><div class="gemini-dot"></div>Impulsado por Claude AI · IHR Labs Uruguay</div>
+    </div>
+
+    <!-- ══ CONFIG VIEW ══ -->
+    <div id="view-config">
+      <div class="cfg-header">
+        <div><div class="cfg-title">⚙️ Configuración</div><div class="cfg-sub">KIOSK v3.0 · ADMIN</div></div>
+        <button class="btn-back" onclick="volverMain()">✕ Cerrar</button>
+      </div>
+      <!-- Apariencia -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">Apariencia</div>
+        <div class="cfg-row">
+          <span class="cfg-row-icon" id="theme-icon">🌙</span>
+          <span class="cfg-row-label" id="theme-label">Modo Oscuro</span>
+          <div class="cfg-toggle on" id="toggle-theme" onclick="toggleTheme()"></div>
+        </div>
+      </div>
+      <!-- Tiempo -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">Tiempo y Formato</div>
+        <div class="cfg-row"><span class="cfg-row-icon">🕐</span><span class="cfg-row-label">Formato de hora</span><span class="cfg-row-val"><select id="cfg-formato-hora" onchange="cambiarFormato()"><option value="24">24h</option><option value="12">12h AM/PM</option></select></span></div>
+        <div class="cfg-row"><span class="cfg-row-icon">🔄</span><span class="cfg-row-label">Auto-reinicio (seg)</span><span class="cfg-row-val"><input type="number" id="cfg-autoreset" value="15" min="5" max="60" style="width:60px"></span></div>
+      </div>
+      <!-- Región -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">Idioma y Región</div>
+        <div class="cfg-row"><span class="cfg-row-icon">🗣️</span><span class="cfg-row-label">Variante regional</span><span class="cfg-row-val"><select id="cfg-idioma"><option value="es-UY" selected>Español (Uruguay)</option><option value="es-AR">Español (Argentina)</option><option value="es-ES">Español (España)</option><option value="pt-BR">Português (Brasil)</option></select></span></div>
+      </div>
+      <!-- Ubicación -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">Ubicación</div>
+        <div class="cfg-map"><div class="cfg-map-grid"></div><div class="cfg-map-pin"><div class="pin-dot"></div><span>Montevideo, Uruguay</span><span style="color:var(--text-muted);font-size:8px">-34.9011°S · 56.1645°O</span></div></div>
+      </div>
+      <!-- IA y Voz -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">IA y Voz</div>
+        <div class="cfg-row"><span class="cfg-row-icon">✨</span><span class="cfg-row-label">Mensajes IA</span><div class="cfg-toggle on" id="toggle-ia" onclick="this.classList.toggle('on')"></div></div>
+        <div class="cfg-row"><span class="cfg-row-icon">🔊</span><span class="cfg-row-label">Voz TTS</span><div class="cfg-toggle on" id="toggle-tts" onclick="this.classList.toggle('on')"></div></div>
+        <div class="cfg-row"><span class="cfg-row-icon">🔑</span><span class="cfg-row-label">API Key Claude</span><span class="cfg-row-val"><input type="password" id="cfg-apikey" placeholder="sk-ant-..." style="width:110px"></span></div>
+      </div>
+      <!-- Reconocimiento Facial -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">Reconocimiento Facial</div>
+        <div class="cfg-row"><span class="cfg-row-icon">📷</span><span class="cfg-row-label">Detección activa</span><div class="cfg-toggle on" id="toggle-face" onclick="this.classList.toggle('on')"></div></div>
+        <div class="cfg-row"><span class="cfg-row-icon">⏱️</span><span class="cfg-row-label">Tiempo de escaneo (seg)</span><span class="cfg-row-val"><input type="number" id="cfg-scan-tiempo" value="20" min="5" max="60" style="width:60px"></span></div>
+        <div class="cfg-row">
+          <span class="cfg-row-icon">🎯</span>
+          <span class="cfg-row-label">Umbral de reconocimiento</span>
+          <span class="cfg-row-val" style="display:flex;align-items:center;gap:6px;">
+            <input type="range" id="cfg-umbral" min="30" max="65" value="42" style="width:70px;accent-color:var(--cyan);" oninput="document.getElementById('cfg-umbral-val').textContent=this.value">
+            <span id="cfg-umbral-val" style="width:20px;text-align:right;">42</span>
+          </span>
+        </div>
+        <div class="cfg-row" style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);padding:6px 12px;">
+          ← más permisivo · más estricto → (default: 42)
+        </div>
+        <div class="cfg-row"><span class="cfg-row-icon">👥</span><span class="cfg-row-label">Funcionarios cargados</span><span class="cfg-row-val" id="cfg-personal-count">5 funcionarios</span></div>
+      </div>
+      <!-- Odoo -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">Integración Odoo</div>
+        <div class="cfg-row"><span class="cfg-row-icon">🌐</span><span class="cfg-row-label">URL del servidor</span><span class="cfg-row-val"><input type="text" id="cfg-odoo-url" placeholder="https://mi.odoo.com" style="width:130px;font-size:10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:6px;padding:5px 8px;color:var(--text-primary);outline:none;"></span></div>
+        <div class="cfg-row"><span class="cfg-row-icon">🔑</span><span class="cfg-row-label">Token API</span><span class="cfg-row-val"><input type="password" id="cfg-odoo-token" placeholder="Bearer token..." style="width:130px;font-size:10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:6px;padding:5px 8px;color:var(--text-primary);outline:none;"></span></div>
+        <div class="cfg-row"><span class="cfg-row-icon">🏢</span><span class="cfg-row-label">ID de base de datos</span><span class="cfg-row-val"><input type="text" id="cfg-odoo-db" placeholder="nombre_db" style="width:130px;font-size:10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:6px;padding:5px 8px;color:var(--text-primary);outline:none;"></span></div>
+        <div class="cfg-row"><span class="cfg-row-icon">⚙️</span><span class="cfg-row-label">Dispositivo ID</span><span class="cfg-row-val"><input type="text" id="cfg-device-id" value="tablet_01" style="width:130px;font-size:10px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:6px;padding:5px 8px;color:var(--text-primary);outline:none;"></span></div>
+      </div>
+      <!-- Eventos -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">Eventos Especiales</div>
+        <div style="display:flex;gap:6px;margin-bottom:6px;">
+          <input id="cfg-evento-nombre" type="text" placeholder="Nombre del evento" style="flex:1;background:var(--input-bg);border:1px solid var(--input-border);border-radius:8px;padding:7px 10px;color:var(--text-primary);font-family:var(--font-display);font-size:12px;outline:none;">
+          <input id="cfg-evento-icono" type="text" placeholder="🎯" maxlength="2" style="width:46px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:8px;padding:7px 6px;color:var(--text-primary);font-family:var(--font-display);font-size:16px;outline:none;text-align:center;">
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:6px;">
+          <select id="cfg-evento-tipo" style="flex:1;background:var(--input-bg);border:1px solid var(--input-border);border-radius:8px;padding:7px 8px;color:var(--text-primary);font-family:var(--font-display);font-size:11px;outline:none;">
+            <option value="1">Salida</option>
+            <option value="0">Entrada</option>
+            <option value="2">Descanso</option>
+            <option value="3">Retorno</option>
+          </select>
+          <input id="cfg-evento-wc" type="number" placeholder="WC (ej: 11)" min="1" max="99" style="width:80px;background:var(--input-bg);border:1px solid var(--input-border);border-radius:8px;padding:7px 8px;color:var(--text-primary);font-family:var(--font-mono);font-size:12px;outline:none;">
+          <button onclick="agregarEvento()" style="background:linear-gradient(135deg,#1565c0,#0d47a1);border:none;border-radius:8px;padding:7px 12px;color:#fff;font-family:var(--font-display);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">+ Agregar</button>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);padding:0 2px 4px;">Tipo de marcación + Work Code numérico (10=Médico, 11=Sal.Trans., 12=Comisión, 13=HS+, 14=HS-, 15=Reunión)</div>
+        <div id="cfg-lista-eventos" style="display:flex;flex-direction:column;gap:5px;max-height:160px;overflow-y:auto;"></div>
+        <div id="cfg-eventos-vacio" style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);text-align:center;padding:10px 0;">Sin eventos configurados</div>
+      </div>
+    </div>
+
+    <!-- ══ ADMIN MENU VIEW ══ -->
+    <div id="view-admin-menu">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:28px;">
+        <div style="width:52px;height:52px;background:linear-gradient(135deg,#1565c0,#00acc1);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 4px 20px rgba(0,150,255,.3);">🔐</div>
+        <div style="font-family:var(--font-display);font-size:17px;font-weight:900;color:var(--text-primary);letter-spacing:1px;">Menú Administrador</div>
+        <div style="font-family:var(--font-mono);font-size:9px;color:rgba(0,229,255,.5);letter-spacing:2px;">ACCESO VERIFICADO · KIOSK v3.0</div>
+      </div>
+
+      <button class="admin-menu-btn" onclick="irAEnrollDesdeAdmin()">
+        <div class="admin-menu-btn-icon">👤</div>
+        <div class="admin-menu-btn-content">
+          <div class="admin-menu-btn-title">Enrolar Funcionario</div>
+          <div class="admin-menu-btn-sub">Registro de rostro biométrico</div>
+        </div>
+        <div class="admin-menu-btn-arrow">→</div>
+      </button>
+
+      <button class="admin-menu-btn" onclick="abrirAdminUsuarios()">
+        <div class="admin-menu-btn-icon">🧑‍🏫</div>
+        <div class="admin-menu-btn-content">
+          <div class="admin-menu-btn-title">Ver Funcionarios</div>
+          <div class="admin-menu-btn-sub" id="admin-usr-sub">Estado biométrico del personal</div>
+        </div>
+        <div class="admin-menu-btn-arrow">→</div>
+      </button>
+
+      <button class="admin-menu-btn" onclick="abrirAdminRegistros()">
+        <div class="admin-menu-btn-icon">📋</div>
+        <div class="admin-menu-btn-content">
+          <div class="admin-menu-btn-title">Ver Registros</div>
+          <div class="admin-menu-btn-sub" id="admin-reg-sub">Consultar asistencia con filtros</div>
+        </div>
+        <div class="admin-menu-btn-arrow">→</div>
+      </button>
+
+      <button class="admin-menu-btn" onclick="irAConfigDesdeAdmin()">
+        <div class="admin-menu-btn-icon">⚙️</div>
+        <div class="admin-menu-btn-content">
+          <div class="admin-menu-btn-title">Configuración</div>
+          <div class="admin-menu-btn-sub">Parámetros del sistema</div>
+        </div>
+        <div class="admin-menu-btn-arrow">→</div>
+      </button>
+
+      <button class="admin-menu-btn" onclick="exportarRegistros()">
+        <div class="admin-menu-btn-icon">📥</div>
+        <div class="admin-menu-btn-content">
+          <div class="admin-menu-btn-title">Exportar Registros</div>
+          <div class="admin-menu-btn-sub" id="admin-export-sub">Descargar TXT de asistencia</div>
+        </div>
+        <div class="admin-menu-btn-arrow">→</div>
+      </button>
+
+      <button class="admin-menu-btn" onclick="mostrarSyncOdoo()">
+        <div class="admin-menu-btn-icon">🔄</div>
+        <div class="admin-menu-btn-content">
+          <div class="admin-menu-btn-title">Sincronizar con Odoo</div>
+          <div class="admin-menu-btn-sub" id="admin-sync-sub">Enviar registros al servidor</div>
+        </div>
+        <div class="admin-menu-btn-arrow">→</div>
+      </button>
+
+      <button onclick="volverMain()" style="margin-top:8px;background:none;border:1px solid var(--row-border);border-radius:12px;padding:10px 28px;color:var(--text-muted);font-family:var(--font-display);font-size:12px;cursor:pointer;transition:all .2s;align-self:center;">✕ Cerrar</button>
+    </div>
+
+
+    <!-- ══ ADMIN: USUARIOS ══ -->
+    <div id="view-admin-usuarios">
+      <div class="admin-view-header">
+        <div>
+          <div class="admin-view-title">👥 Funcionarios</div>
+          <div class="admin-view-sub">ESTADO DE REGISTRO BIOMÉTRICO</div>
+        </div>
+        <button class="btn-back" onclick="mostrarVista('view-admin-menu')">← Volver</button>
+      </div>
+      <div class="admin-view-body" id="admin-usr-list"></div>
+    </div>
+
+    <!-- ══ ADMIN: REGISTROS ══ -->
+    <div id="view-admin-registros">
+      <div class="admin-view-header">
+        <div>
+          <div class="admin-view-title">📋 Registros de Asistencia</div>
+          <div class="admin-view-sub">CONSULTA CON FILTROS</div>
+        </div>
+        <button class="btn-back" onclick="mostrarVista('view-admin-menu')">← Volver</button>
+      </div>
+      <div style="padding:12px 16px 0;flex-shrink:0;">
+        <div class="reg-filters">
+          <div class="reg-filter-row">
+            <span class="reg-filter-label">DESDE</span>
+            <input type="date" id="reg-f-desde" class="reg-filter-input">
+            <span class="reg-filter-label" style="width:36px;">HASTA</span>
+            <input type="date" id="reg-f-hasta" class="reg-filter-input">
+          </div>
+          <div class="reg-filter-row">
+            <span class="reg-filter-label">FUNC.</span>
+            <select id="reg-f-emp" class="reg-filter-input">
+              <option value="">Todos los funcionarios</option>
+            </select>
+            <button class="reg-apply-btn" onclick="filtrarRegistros()">🔍 Filtrar</button>
+          </div>
+        </div>
+      </div>
+      <div class="admin-view-body">
+        <div class="reg-count" id="reg-count">— registros</div>
+        <div class="reg-table" id="reg-table"></div>
+      </div>
+    </div>
+
+    <!-- ══ LOGIN VIEW ══ -->
+    <div id="view-login">
+      <div class="login-box">
+        <div style="text-align:center;font-size:32px">🔐</div>
+        <div class="login-title">Acceso Administrador</div>
+        <div class="login-sub">SISTEMA KIOSK IA · CEP ANEP</div>
+        <input class="login-input" type="password" id="login-pass" placeholder="Contraseña" onkeydown="if(event.key==='Enter')verificarLogin()">
+        <div class="login-error" id="login-error">Contraseña incorrecta</div>
+        <button class="login-btn" onclick="verificarLogin()">INGRESAR</button>
+        <button class="login-cancel" onclick="volverMain()">Cancelar</button>
+      </div>
+    </div>
+
+    <!-- ══ INSTRUCCIONES ENROLAMIENTO ══ -->
+    <div id="view-enroll-instrucciones">
+      <div class="inst-scroll">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+          <div style="font-family:var(--font-mono);font-size:9px;color:rgba(0,229,255,.5);letter-spacing:2px;">ENROLAMIENTO BIOMÉTRICO</div>
+          <button onclick="volverMain()" style="background:none;border:1px solid var(--row-border);border-radius:8px;padding:4px 10px;color:var(--text-muted);font-family:var(--font-display);font-size:11px;cursor:pointer;">✕</button>
+        </div>
+        <div class="inst-titulo-grande">Registro Facial</div>
+        <div class="inst-subtitulo">Intente mantener el rostro en el centro de la pantalla durante el registro.<br>Mire hacia la cámara y quédese quieto durante el registro facial.</div>
+        <div class="inst-circulo-demo">
+          <div class="inst-scan-hint"></div>
+          <svg viewBox="0 0 60 60" width="60" height="60" fill="none">
+            <ellipse cx="30" cy="22" rx="11" ry="13" stroke="rgba(0,229,255,.5)" stroke-width="1.5"/>
+            <path d="M10 52c0-11 9-18 20-18s20 7 20 18" stroke="rgba(0,229,255,.5)" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="23" cy="20" r="2" fill="rgba(0,229,255,.6)"/><circle cx="37" cy="20" r="2" fill="rgba(0,229,255,.6)"/>
+            <path d="M25 28 Q30 32 35 28" stroke="rgba(0,229,255,.5)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+          </svg>
+        </div>
+        <div class="inst-seccion">
+          <div class="inst-seccion-titulo">📋 Registro facial correcto</div>
+          <div class="inst-item"><div class="inst-bullet"></div><div class="inst-texto">Al registrar un rostro, mantenga un espacio de <strong style="color:var(--cyan)">40 cm a 70 cm</strong> entre el dispositivo y el rostro.</div></div>
+          <div class="inst-item"><div class="inst-bullet"></div><div class="inst-texto">No cambie la expresión facial: evite sonrisas exageradas, gestos, guiños, etc.</div></div>
+          <div class="inst-item"><div class="inst-bullet"></div><div class="inst-texto">Si no sigue las instrucciones, el registro puede tardar más o fallar.</div></div>
+          <div class="inst-item"><div class="inst-bullet"></div><div class="inst-texto"><strong style="color:#ff8a65;">No</strong> se cubra los ojos ni las cejas. <strong style="color:#ff8a65;">No</strong> use sombreros, cubrebocas ni anteojos de sol.</div></div>
+          <div class="inst-item"><div class="inst-bullet"></div><div class="inst-texto">Registre <strong style="color:var(--cyan)">solo un rostro</strong> por vez. Dos personas en pantalla puede causar fallo.</div></div>
+        </div>
+        <div class="inst-seccion">
+          <div class="inst-seccion-titulo">🔐 Autenticación facial</div>
+          <div class="inst-item"><div class="inst-bullet"></div><div class="inst-texto">Asegúrese de que el rostro aparezca dentro del <strong style="color:var(--cyan)">círculo de detección</strong> en pantalla.</div></div>
+          <div class="inst-item"><div class="inst-bullet"></div><div class="inst-texto">Sombrero, parche, anteojos de sol o más de un rostro en pantalla puede causar fallo.</div></div>
+          <div class="inst-item"><div class="inst-bullet"></div><div class="inst-texto">Permita que el dispositivo reconozca tanto las cejas como el rostro completo.</div></div>
+        </div>
+      </div>
+      <div class="inst-footer">
+        <button class="btn-inst-cancel" onclick="volverMain()">Cancelar</button>
+        <button class="btn-continuar" onclick="irAEnroll()">Continuar →</button>
+      </div>
+    </div>
+
+    <!-- ══ ENROLL VIEW ══ -->
+    <div id="view-enroll">
+      <!-- Overlay anti-duplicado -->
+      <div id="overlay-duplicado">
+        <div class="dup-icon">⚠️</div>
+        <div class="dup-titulo">Rostro ya registrado</div>
+        <div class="dup-msg">Este rostro ya se encuentra asociado a otro funcionario y no puede registrarse nuevamente.</div>
+        <div class="dup-quien" id="dup-quien-label">Funcionario: —</div>
+        <button class="dup-btn" onclick="cerrarOverlayDuplicado()">Entendido</button>
+      </div>
+      <div class="cfg-header">
+        <div><div class="cfg-title">Enrolamiento</div><div class="cfg-sub">SELECCIONÁ UN FUNCIONARIO</div></div>
+        <button class="btn-back" onclick="volverMain()">✕</button>
+      </div>
+      <div id="enroll-func-lista" style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1;"></div>
+      <div id="enroll-func-vacio" style="display:none;text-align:center;padding:40px 0;">
+        <div style="font-size:36px;margin-bottom:10px;">📭</div>
+        <div style="font-family:var(--font-display);font-size:14px;color:var(--text-muted);">No hay funcionarios cargados</div>
+      </div>
+      <div id="enroll-captura" style="display:none;flex-direction:column;gap:10px;">
+        <div style="display:flex;align-items:center;gap:10px;background:var(--glass);border:1px solid var(--glass-border);border-radius:10px;padding:10px 12px;">
+          <div id="enroll-sel-avatar" style="width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:17px;font-weight:700;flex-shrink:0;border:2px solid rgba(255,255,255,.2);">👤</div>
+          <div>
+            <div style="font-family:var(--font-mono);font-size:9px;color:rgba(0,229,255,.5);" id="enroll-sel-codigo">---</div>
+            <div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text-primary);" id="enroll-sel-nombre">Funcionario</div>
+          </div>
+        </div>
+        <div class="enroll-bio-area" style="padding:10px 14px;gap:8px;">
+          <!-- Círculo cámara con borde de calidad -->
+          <div id="enroll-cam-ring" style="position:relative;width:160px;height:160px;border-radius:50%;overflow:hidden;border:3px solid rgba(0,229,255,.3);background:#060c16;flex-shrink:0;box-shadow:0 0 20px rgba(0,229,255,.15);transition:border-color .3s,box-shadow .3s;">
+            <video id="enroll-video" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;border-radius:50%;transform:scaleX(-1);"></video>
+            <canvas id="enroll-canvas" style="position:absolute;inset:0;border-radius:50%;pointer-events:none;"></canvas>
+            <div id="enroll-placeholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:40px;color:rgba(0,229,255,.4);">👤</div>
+            <div style="position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#00e5ff,transparent);box-shadow:0 0 8px #00e5ff;animation:scanMove 2s ease-in-out infinite;top:0;"></div>
+            <!-- Score de calidad sobre la imagen -->
+            <div id="enroll-score-overlay" style="position:absolute;bottom:6px;left:0;right:0;text-align:center;font-family:var(--font-mono);font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 4px #000;letter-spacing:1px;display:none;"></div>
+          </div>
+          <!-- Panel derecho: calidad + muestras -->
+          <div style="width:100%;display:flex;flex-direction:column;gap:6px;">
+            <!-- Calidad en tiempo real -->
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);letter-spacing:1px;">CALIDAD</span>
+              <span class="enroll-quality-label" id="enroll-quality-label">—</span>
+            </div>
+            <div class="enroll-quality-bar-wrap"><div class="enroll-quality-bar" id="enroll-quality-bar"></div></div>
+            <!-- Progreso total -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;">
+              <span style="font-family:var(--font-mono);font-size:8px;color:var(--text-muted);letter-spacing:1px;">MUESTRAS</span>
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--cyan);" id="enroll-count-label">0/30</span>
+            </div>
+            <div class="enroll-progress-wrap"><div class="enroll-progress-bar" id="enroll-prog-bar"></div></div>
+            <!-- Grilla de puntos — una por muestra -->
+            <div class="enroll-samples-grid" id="enroll-dots-grid"></div>
+            <div class="enroll-progress-label" id="enroll-prog-label">Posicioná tu rostro</div>
+          </div>
+          <div class="enroll-label" id="enroll-cam-label">INICIANDO CÁMARA...</div>
+          <div class="enroll-info" id="enroll-cam-status">Mirá directo a la cámara</div>
+          <div class="enroll-auto-hint" id="enroll-auto-hint">La captura inicia automáticamente al detectar tu rostro</div>
+        </div>
+        <button class="enroll-btn" id="enroll-confirm-btn" onclick="confirmarEnrollManual()" style="display:none;">📸 GUARDAR PERFIL BIOMÉTRICO</button>
+        <button onclick="mostrarListaFuncionarios()" style="background:none;border:1px solid var(--row-border);border-radius:10px;padding:8px;color:var(--text-muted);font-family:var(--font-display);font-size:12px;cursor:pointer;">← Cambiar funcionario</button>
+      </div>
+    </div>
+
+    <!-- ══ OVERLAY EVENTOS ══ -->
+    
+    
+    <!-- ══ EXPORT FORMAT MODAL ══ -->
+    <div id="overlay-export">
+      <div class="export-modal">
+        <div class="export-modal-title">📥 Exportar Registros</div>
+        <div class="export-modal-sub">SELECCIONÁ EL FORMATO DE DESCARGA</div>
+        <div class="export-record-count" id="export-record-count">0 registros listos para exportar</div>
+        <div class="export-fmt-grid">
+          <button class="export-fmt-btn txt-btn" onclick="ejecutarExport('txt')">
+            <span class="export-fmt-icon">📄</span>
+            <span class="export-fmt-name">TXT</span>
+            <span class="export-fmt-desc">Compatible con<br>relojes estándar</span>
+          </button>
+          <button class="export-fmt-btn xlsx-btn" onclick="ejecutarExport('xlsx')">
+            <span class="export-fmt-icon">📊</span>
+            <span class="export-fmt-name">Excel</span>
+            <span class="export-fmt-desc">Tabla con<br>encabezados</span>
+          </button>
+        </div>
+        <button class="export-modal-cancel" onclick="cerrarExportModal()">✕ Cancelar</button>
+      </div>
+    </div>
+
+    <!-- ══ WORK CODE POPUP ══ -->
+    <div id="overlay-workcode">
+      <div class="wc-sheet">
+        <div class="wc-title">¿Motivo de la marcación?</div>
+        <div class="wc-tipo" id="wc-tipo-label">SALIDA</div>
+        <div class="wc-grid" id="wc-grid">
+          <button class="wc-btn wc-normal" onclick="confirmarWorkCode(0)">
+            <span class="wc-btn-code">WC-00</span>
+            <span class="wc-btn-label">Marcación Normal</span>
+          </button>
+          <button class="wc-btn" onclick="confirmarWorkCode(10)">
+            <span class="wc-btn-code">WC-10</span><span class="wc-btn-label">🏥 Médico</span>
+          </button>
+          <button class="wc-btn" onclick="confirmarWorkCode(11)">
+            <span class="wc-btn-code">WC-11</span><span class="wc-btn-label">🚶 Salida transitoria</span>
+          </button>
+          <button class="wc-btn" onclick="confirmarWorkCode(12)">
+            <span class="wc-btn-code">WC-12</span><span class="wc-btn-label">📋 Comisión</span>
+          </button>
+          <button class="wc-btn" onclick="confirmarWorkCode(13)">
+            <span class="wc-btn-code">WC-13</span><span class="wc-btn-label">⏰ Inicio HS Extra</span>
+          </button>
+          <button class="wc-btn" onclick="confirmarWorkCode(14)">
+            <span class="wc-btn-code">WC-14</span><span class="wc-btn-label">⏰ Fin HS Extra</span>
+          </button>
+          <button class="wc-btn" onclick="confirmarWorkCode(15)">
+            <span class="wc-btn-code">WC-15</span><span class="wc-btn-label">🤝 Reunión externa</span>
+          </button>
+        </div>
+        <div class="wc-countdown" id="wc-countdown">Seleccioná un motivo — se registra Normal en <span id="wc-secs">3</span>s</div>
+      </div>
+    </div>
+
+    <div id="overlay-eventos" style="display:none;position:absolute;inset:0;z-index:50;background:rgba(5,11,20,.92);backdrop-filter:blur(10px);flex-direction:column;padding:18px 16px 16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div>
+          <div style="font-family:var(--font-display);font-size:15px;font-weight:700;color:var(--text-primary);">📋 Seleccioná un Evento</div>
+          <div style="font-family:var(--font-mono);font-size:9px;color:rgba(0,229,255,.5);letter-spacing:2px;margin-top:2px;">REGISTRAR EVENTO ESPECIAL</div>
+        </div>
+        <button onclick="cerrarEventos()" style="background:none;border:1px solid var(--row-border);border-radius:8px;padding:5px 12px;color:var(--text-muted);font-family:var(--font-display);font-size:11px;cursor:pointer;">✕ Cancelar</button>
+      </div>
+      <div id="lista-eventos" style="display:flex;flex-direction:column;gap:7px;overflow-y:auto;flex:1;"></div>
+      <div id="eventos-vacio" style="display:none;text-align:center;padding:30px 0;">
+        <div style="font-size:32px;margin-bottom:8px;">📭</div>
+        <div style="font-family:var(--font-display);font-size:13px;color:var(--text-muted);">No hay eventos configurados</div>
+        <div style="font-family:var(--font-mono);font-size:10px;color:rgba(0,229,255,.4);margin-top:6px;">Agregá eventos en ⚙️ Config → Eventos</div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"><span>✅</span><span id="toast-msg">Marcación registrada</span></div>
+  </div><!-- /screen -->
+</div><!-- /tablet-frame -->
+
+
+<!-- Lógica -->
+<script src="js/ui/theme.js"></script>
+<script src="js/ui/clock.js"></script>
+<script src="js/data/data.js"></script>
+<script src="js/ui/views.js"></script>
+<script src="js/services/biometric.js"></script>
+</body>
+</html>
