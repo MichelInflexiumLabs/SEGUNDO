@@ -657,9 +657,10 @@ function setProgreso(pct,label){
 }
 
 // ── Estado de captura automática ──────────────────────────
-const ENROLL_TOTAL   = 30;   // muestras objetivo
-const ENROLL_MIN_OK  = 15;   // mínimo para guardar
-const ENROLL_SCORE   = 0.72; // score mínimo para aceptar muestra
+const ENROLL_TOTAL   = 15;   // muestras objetivo
+const ENROLL_MIN_OK  = 8;    // mínimo para guardar
+const ENROLL_SCORE   = 0.55; // score mínimo para aceptar muestra
+const ENROLL_DIV_MIN = 0.22; // distancia mínima entre muestras (forzar diversidad)
 let   enrollCapturing = false;   // captura en curso
 let   enrollDots      = [];      // clase CSS de cada punto
 let   enrollDescsBuf  = [];      // descriptores acumulados
@@ -784,34 +785,42 @@ function arrancarDeteccionEnroll(){
         // Capturar muestra automáticamente si calidad es suficiente
         // Mínimo 250ms entre capturas para evitar frames idénticos
         if(score>=ENROLL_SCORE && (now-lastCapture)>=250){
-          lastCapture=now;
-          const idx=okCount;
-          if(idx<ENROLL_TOTAL){
-            const dotCls = score>=0.85?'ok':score>=0.72?'ok':'warn';
-            setDot(idx, dotCls);
-            enrollDescsBuf.push(det.descriptor);
-            enrollScoresBuf.push(score);
-            const newOk=enrollDescsBuf.length;
-            const pct=Math.round((newOk/ENROLL_TOTAL)*100);
-            if(countLbl) countLbl.textContent=`${newOk}/${ENROLL_TOTAL}`;
-            setProgreso(pct,`Muestra ${newOk}/${ENROLL_TOTAL} — Score: ${Math.round(score*100)}%`);
+          // Filtro de diversidad: rechazar si es muy similar a una muestra existente
+          const esDiversa = enrollDescsBuf.length===0 || enrollDescsBuf.every(
+            prev => faceapi.euclideanDistance(prev, det.descriptor) >= ENROLL_DIV_MIN
+          );
+          if(!esDiversa){
+            document.getElementById('enroll-cam-status').textContent='Mueve levemente la cabeza';
+          }
+          if(esDiversa){
+            lastCapture=now;
+            const idx=okCount;
+            if(idx<ENROLL_TOTAL){
+              setDot(idx, 'ok');
+              enrollDescsBuf.push(det.descriptor);
+              enrollScoresBuf.push(score);
+              const newOk=enrollDescsBuf.length;
+              const pct=Math.round((newOk/ENROLL_TOTAL)*100);
+              if(countLbl) countLbl.textContent=`${newOk}/${ENROLL_TOTAL}`;
+              setProgreso(pct,`Muestra ${newOk}/${ENROLL_TOTAL} — Score: ${Math.round(score*100)}%`);
 
-            if(newOk>=ENROLL_TOTAL){
-              clearInterval(enrollAutoLoop); enrollAutoLoop=null;
-              _finalizarCaptura();
-            } else if(newOk>=ENROLL_MIN_OK){
-              // Suficientes muestras → mostrar botón de guardar
-              const btn=document.getElementById('enroll-confirm-btn');
-              if(btn) btn.style.display='block';
-              document.getElementById('enroll-cam-label').textContent=`${newOk} MUESTRAS LISTAS`;
-              document.getElementById('enroll-cam-status').textContent=`Podés guardar o esperar ${ENROLL_TOTAL-newOk} muestras más`;
-            } else {
-              document.getElementById('enroll-cam-label').textContent=`CAPTURANDO ${newOk}/${ENROLL_TOTAL}`;
-              document.getElementById('enroll-cam-status').textContent='Mantené el rostro centrado';
+              if(newOk>=ENROLL_TOTAL){
+                clearInterval(enrollAutoLoop); enrollAutoLoop=null;
+                _finalizarCaptura();
+              } else if(newOk>=ENROLL_MIN_OK){
+                // Suficientes muestras → mostrar botón de guardar
+                const btn=document.getElementById('enroll-confirm-btn');
+                if(btn) btn.style.display='block';
+                document.getElementById('enroll-cam-label').textContent=`${newOk} MUESTRAS LISTAS`;
+                document.getElementById('enroll-cam-status').textContent=`Podés guardar o esperar ${ENROLL_TOTAL-newOk} muestras más`;
+              } else {
+                document.getElementById('enroll-cam-label').textContent=`CAPTURANDO ${newOk}/${ENROLL_TOTAL}`;
+                document.getElementById('enroll-cam-status').textContent='Mantené el rostro centrado';
+              }
             }
           }
         } else if(score<ENROLL_SCORE){
-          const hint=score<0.55?'Iluminá mejor tu cara':'Acercate un poco más a la cámara';
+          const hint=score<0.35?'Iluminá mejor tu cara':'Acercate un poco a la cámara';
           document.getElementById('enroll-cam-label').textContent='CALIDAD INSUFICIENTE';
           document.getElementById('enroll-cam-status').textContent=hint;
         }
